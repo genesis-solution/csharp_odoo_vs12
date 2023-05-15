@@ -28,15 +28,15 @@ namespace FPClient.Interface
         
         // Selected User
         private string userName, userEmail;
-        private string strFacePicPath, strCardPicPath;
+        private string strFacePicPath;
 
         private int nIndex = 0;// Selected device
-        private int Recordnumber = 0;
         private AxFP_CLOCKLib.AxFP_CLOCK pOcxObject;
 
         JArray devices = new JArray();
         private bool m_bDeviceOpened = false;
         private int m_nSelectedIndex = -1;
+        private string mstrPhotoDir = "C:\\PHOTO";
 
         APIService apiService { get; set; }
 
@@ -94,7 +94,6 @@ namespace FPClient.Interface
             this.listView_devices.Columns.Add("InOut", 60, HorizontalAlignment.Left);
             this.listView_devices.Columns.Add("DateTime", 140, HorizontalAlignment.Left);
             this.listView_devices.Columns.Add("IP", 130, HorizontalAlignment.Left);
-            this.listView_devices.Columns.Add("Port", 60, HorizontalAlignment.Left);
             this.listView_devices.Columns.Add("DevID", 60, HorizontalAlignment.Left);
             this.listView_devices.Columns.Add("SerialNo", 60, HorizontalAlignment.Left);
 
@@ -104,8 +103,15 @@ namespace FPClient.Interface
             this.button_pass.Enabled = false;
             this.button_nopass.Enabled = false;
             this.textBox1.Text = "3";
+            this.textBox_port.Text = "5005";
             if (this.devices.Count > 0) this.devices.Clear();
+            SetPhotoDir();
+            setLabelAlarm("Getting users list from server.. Just a second...");
+            
         }
+
+        Byte[] gbytEnrollData;
+        Byte[] gbytEnrollDataFace;
 
         private void FormDashboard_Resize(object sender, EventArgs e)
         {
@@ -249,7 +255,7 @@ namespace FPClient.Interface
                 }
                 else
                 {
-                    MessageBox.Show("Error: " + nStatus.ToString() + ", Error : " + resJson["message"]);
+                    setLabelAlarm("Error: " + nStatus.ToString() + ", Error : " + resJson["message"]);
                 }
 
 
@@ -268,12 +274,12 @@ namespace FPClient.Interface
                     Console.WriteLine("Error status code: {0}", response.StatusCode);
                     Console.WriteLine("Error message: {0}", response.StatusDescription);
 
-                    MessageBox.Show(response.StatusDescription, "Error");
+                    setLabelAlarm("Error message: " + response.StatusDescription);
                 }
                 else
                 {
                     Console.WriteLine("Error: {0}", ex.Message);
-                    MessageBox.Show(ex.Message, "Error");
+                    setLabelAlarm(ex.Message);
                 }
             }
         }
@@ -285,6 +291,8 @@ namespace FPClient.Interface
                 this.pictureBox_loading1.Visible = true;
                 Thread thread = new Thread(new ThreadStart(HttpRequestThread));
                 thread.Start();
+
+                setLabelAlarm("Getting users again from server");
             }
         }
 
@@ -301,6 +309,8 @@ namespace FPClient.Interface
                 this.userEmail = selectedItem.SubItems[4].Text.ToString();
                 this.label_name.Text = "Name: " + this.userName;
                 this.label_email.Text = "Email: " + this.userEmail;
+
+                setLabelAlarm("Please input your image if you are one of members.");
 
             }
         }
@@ -325,7 +335,7 @@ namespace FPClient.Interface
                 Bitmap image = new Bitmap(this.strFacePicPath);
                 this.pictureBox_faceImage.Image = image;
                 // ...
-                MessageBox.Show("Please select a device to send the data.");
+                setLabelAlarm("Please select a device to send the data.");
             }
         }
 
@@ -344,8 +354,14 @@ namespace FPClient.Interface
 
             int nCnt = Convert.ToInt32(this.textBox1.Text.ToString());
 
-            for (int i = 0; i < nCnt; i++ )
+            setLabelAlarm("Opening the door.");
+            for (int i = 0; i < nCnt; i++)
+            {
+                this.axFP_CLOCK.EnableDevice(obj.vnDeviceID, 0);
                 this.axFPCLOCK_Svr1.SendResultandTime(obj.linkindex, obj.vnDeviceID, obj.anSEnrollNumber, nResult1);
+                this.axFP_CLOCK.EnableDevice(obj.vnDeviceID, 1);
+            }
+
         }
 
         private void label1_Click(object sender, EventArgs e)
@@ -360,6 +376,8 @@ namespace FPClient.Interface
             this.axFPCLOCK_Svr1.OpenNetwork(nPort);
             this.connect.Enabled = false;
             this.Disconnect.Enabled = true;
+
+            this.devices.Clear();
         }
 
         private void Disconnect_Click(object sender, EventArgs e)
@@ -370,6 +388,10 @@ namespace FPClient.Interface
 
             this.connect.Enabled = true;
             this.Disconnect.Enabled = false;
+
+            this.button_pass.Enabled = false;
+            this.button_nopass.Enabled = false;
+            this.button_deviceOpen.Enabled = false;
         }
 
         public String FormString(int nVerify, int nEnrollNum)
@@ -425,13 +447,29 @@ namespace FPClient.Interface
             this.m_nSelectedIndex = -1;
         }
 
+        // Device List
         private void axFPCLOCK_Svr1_OnReceiveGLogData(object sender, AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent e)
         {
             JObject newObject = JObject.FromObject(e);
+
+            for (int ii = 0; ii < this.devices.Count; ii++)
+            {
+                JObject oldObj = (JObject)this.devices[ii];
+                AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent oldEvent = oldObj.ToObject<AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent>();
+                if (oldEvent.astrDeviceIP == e.astrDeviceIP &&
+                    oldEvent.anDevicePort == e.anDevicePort &&
+                    oldEvent.vnDeviceID == e.vnDeviceID &&
+                    oldEvent.anVerifyMode == e.anVerifyMode &&
+                    oldEvent.anInOutMode == e.anInOutMode)
+                {
+                    return;
+                }
+            }
+            
             this.devices.Add(newObject);
 
             String strKey = Convert.ToString(nIndex + 1);
-            String str = e.anSEnrollNumber.ToString("D8");
+            String str = e.anSEnrollNumber.ToString(); // "D8"
             int imagelen = 0;
             int[] imagebuff = new int[200 * 1024];
             bool bRet;
@@ -449,7 +487,7 @@ namespace FPClient.Interface
 
             this.listView_devices.BeginUpdate();
 
-            //this.listView1.Focus();
+            this.listView_devices.Focus();
             ListViewItem lvi = new ListViewItem();
             lvi.Text = strKey;
 
@@ -486,9 +524,6 @@ namespace FPClient.Interface
             //str = Convert.ToString(e.astrDeviceIP);
             lvi.SubItems.Add(e.astrDeviceIP);
 
-            str = Convert.ToString(e.anDevicePort);
-            lvi.SubItems.Add(str);
-
             str = Convert.ToString(e.vnDeviceID);
             lvi.SubItems.Add(str);
 
@@ -496,23 +531,26 @@ namespace FPClient.Interface
             lvi.SubItems.Add(str);
 
             this.listView_devices.Items.Add(lvi);
+
             //this.listView1.Items.(5, str);
 
             this.listView_devices.Update();
 
             this.listView_devices.EnsureVisible(nIndex);
-            this.listView_devices.EndUpdate(); 
+            this.listView_devices.EndUpdate();
 
-            //int nResult1 = 1;
-            //int nResult2 = 3;
-            //if (e.anSEnrollNumber == 0)
-            //{
-            //    this.axFPCLOCK_Svr1.SendResultandTime(e.linkindex, e.vnDeviceID, e.anSEnrollNumber, nResult1);
-            //}
-            //else
-            //{
-            //    this.axFPCLOCK_Svr1.SendResultandTime(e.linkindex, e.vnDeviceID, e.anSEnrollNumber, nResult2);
-            //}
+            this.button_getEnroll.Enabled = true;
+
+            int nResult1 = 1;
+            int nResult2 = 3;
+            if (e.anSEnrollNumber == 0)
+            {
+                this.axFPCLOCK_Svr1.SendResultandTime(e.linkindex, e.vnDeviceID, e.anSEnrollNumber, nResult1);
+            }
+            else
+            {
+                this.axFPCLOCK_Svr1.SendResultandTime(e.linkindex, e.vnDeviceID, e.anSEnrollNumber, nResult2);
+            }
 
 
             nIndex++;
@@ -533,59 +571,28 @@ namespace FPClient.Interface
                 this.groupBox1.Visible = true;
                 ListViewItem selectedItem = this.listView_devices.SelectedItems[0];
                 // Do something with the selected item
-                m_nSelectedIndex = this.listView_devices.SelectedIndices[0];
+                this.m_nSelectedIndex = this.listView_devices.SelectedIndices[0];
 
-                // Assume that jArray is an existing JArray
-                JObject jObject = (JObject)devices[m_nSelectedIndex];
+                JObject jObject = (JObject)devices[this.m_nSelectedIndex];
                 AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent obj = jObject.ToObject<AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent>();
 
-                
-                bool bRet;
-                // 
-                if (this.m_bDeviceOpened)
-                {
-                    this.button_pass.Text = "Open";
-                    m_bDeviceOpened = false;
+                this.ipAddressControl1.Text = obj.astrDeviceIP;
+                this.textBox_port.Text = "5005";
+                this.textPassword.Text = "0";
+                this.textPassword.ReadOnly = true;
+                this.textBox_machineNumber.Text = obj.vnDeviceID.ToString();
 
-                    axFP_CLOCK.CloseCommPort();
-                    return;
-                }
-                this.axFP_CLOCK.OpenCommPort(obj.vnDeviceID);
-                bRet = this.axFP_CLOCK.SetIPAddress(ref obj.astrDeviceIP, obj.anDevicePort, 0);
-                if (!bRet)
-                {
-                    return;
-                }
-                bRet = this.axFP_CLOCK.OpenCommPort(obj.vnDeviceID);
-                if (bRet)
-                {
-                    m_bDeviceOpened = true;
-                    this.button_pass.Text = "Close";
-                }
-
-                // Set enroll data
-                this.DisableDevice(obj.vnDeviceID);
-                int[] indexDataFacePhoto = new int[400800];
-                IntPtr ptrIndexFacePhoto = Marshal.AllocHGlobal(indexDataFacePhoto.Length);
-
-                // string path = @"C:\\PHOTO\" + dwEnrollNumber.ToString() + ".jpg";
-                bRet = System.IO.File.Exists(this.strFacePicPath);
-                if (bRet)
-                {
-                    byte[] mbytCurEnrollData = System.IO.File.ReadAllBytes(this.strFacePicPath);
-                    Marshal.Copy(mbytCurEnrollData, 0, ptrIndexFacePhoto, mbytCurEnrollData.Length);
-                    bRet = this.axFP_CLOCK.SetEnrollPhotoCS(obj.vnDeviceID, obj.anSEnrollNumber, mbytCurEnrollData.Length, ptrIndexFacePhoto);
-                    MessageBox.Show("Success SetEnrollPhotoCS");
-
-                    this.button_pass.Enabled = true;
-                    this.button_nopass.Enabled = true;
-                }
-                else
-                {
-                    MessageBox.Show("Picture does not exist");
-                }
+                this.button_deviceOpen.Enabled = true;
             }
             
+        }
+
+        private void listView_devices_DoubleClicked(object sender, EventArgs e)
+        {
+            if (this.m_nSelectedIndex < 0)
+            {
+                MessageBox.Show("Please select a device.");
+            }
         }
 
         private void pictureBox_deviceSetting_Click_1(object sender, EventArgs e)
@@ -610,15 +617,15 @@ namespace FPClient.Interface
 
         private bool DisableDevice(int nMachineNum)
         {
-            bool bRet = pOcxObject.EnableDevice(nMachineNum, 0);
+            bool bRet = this.axFP_CLOCK.EnableDevice(nMachineNum, 0);
             if (bRet)
             {
-                MessageBox.Show("Disable Device Success!");
+                setLabelAlarm("Disable Device Success!");
                 return true;
             }
             else
             {
-                MessageBox.Show("No Device...");
+                setLabelAlarm("No any Devices...");
                 return false;
             }
         }
@@ -634,8 +641,13 @@ namespace FPClient.Interface
             JObject jObject = (JObject)devices[m_nSelectedIndex];
             AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent obj = jObject.ToObject<AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent>();
 
+            setLabelAlarm("Closing the door.");
             int nResult1 = 3;
+
+            this.axFP_CLOCK.EnableDevice(obj.vnDeviceID, 0);
             this.axFPCLOCK_Svr1.SendResultandTime(obj.linkindex, obj.vnDeviceID, obj.anSEnrollNumber, nResult1);
+            this.axFP_CLOCK.EnableDevice(obj.vnDeviceID, 1);
+  
         }
 
         private void textBox1_TextChanged(object sender, EventArgs e)
@@ -648,7 +660,7 @@ namespace FPClient.Interface
             }
             if (Convert.ToInt32(this.textBox1.Text.ToString()) > nMaxCnt)
             {
-                MessageBox.Show("Max count is 3.");
+                setLabelAlarm("Max count is 3.");
                 this.textBox1.Text = nMaxCnt.ToString();
             }
             else if (Convert.ToInt32(this.textBox1.Text.ToString()) < 1)
@@ -672,7 +684,7 @@ namespace FPClient.Interface
             nCurrCnt--;
             if (nCurrCnt > nMaxCnt)
             {
-                MessageBox.Show("Max count is 3.");
+                setLabelAlarm("Max count is 3.");
                 this.textBox1.Text = nMaxCnt.ToString();
             }
             else if (nCurrCnt < 1)
@@ -692,7 +704,7 @@ namespace FPClient.Interface
             nCurrCnt++;
             if (nCurrCnt > nMaxCnt)
             {
-                MessageBox.Show("Max count is 3.");
+                setLabelAlarm("Max count is 3.");
                 this.textBox1.Text = nMaxCnt.ToString();
             }
             else if (nCurrCnt < 1)
@@ -702,6 +714,257 @@ namespace FPClient.Interface
             else
             {
                 this.textBox1.Text = nCurrCnt.ToString();
+            }
+        }
+
+        private void button_deviceOpen_Click(object sender, EventArgs e)
+        {
+            if (this.m_nSelectedIndex < 0) 
+            {
+                MessageBox.Show("Please select a device in list.");
+                return;
+            }
+            // Assume that jArray is an existing JArray
+            JObject jObject = (JObject)devices[this.m_nSelectedIndex];
+            AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent obj = jObject.ToObject<AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent>();
+
+
+            bool bRet;
+            // 
+
+            if (this.m_bDeviceOpened)
+            {
+                this.button_deviceOpen.Text = "Open";
+                m_bDeviceOpened = false;
+                this.button_pass.Enabled = false;
+                this.button_nopass.Enabled = false;
+
+                this.axFP_CLOCK.CloseCommPort();
+                return;
+            }
+            int nDevicePort = Convert.ToInt32(this.textBox_port.Text.ToString());
+            int nPassword = Convert.ToInt32(this.textPassword.Text);
+            string strIP = this.ipAddressControl1.IPAddress.ToString();
+            int nDeviceID = Convert.ToInt32(this.textBox_machineNumber.Text.ToString());
+            this.axFP_CLOCK.OpenCommPort(nDeviceID);
+            bRet = this.axFP_CLOCK.SetIPAddress(ref strIP, nDevicePort, nPassword);
+            if (!bRet)
+            {
+                setLabelAlarm("Setting IP fail");
+                return;
+            }
+            this.axFP_CLOCK.OpenCommPort(nDeviceID);
+            this.m_bDeviceOpened = true;
+            this.button_deviceOpen.Text = "Close";
+            
+            
+            if (!this.DisableDevice(nDeviceID)) return;
+
+            int[] indexDataFacePhoto = new int[400800];
+            IntPtr ptrIndexFacePhoto = Marshal.AllocHGlobal(indexDataFacePhoto.Length);
+
+            // string path = @"C:\\PHOTO\" + dwEnrollNumber.ToString() + ".jpg";
+            bRet = System.IO.File.Exists(this.strFacePicPath);
+            if (bRet)
+            {
+                byte[] mbytCurEnrollData = System.IO.File.ReadAllBytes(this.strFacePicPath);
+                Marshal.Copy(mbytCurEnrollData, 0, ptrIndexFacePhoto, mbytCurEnrollData.Length);
+                bRet = this.axFP_CLOCK.SetEnrollPhotoCS(obj.vnDeviceID, obj.anSEnrollNumber, mbytCurEnrollData.Length, ptrIndexFacePhoto);
+                setLabelAlarm("Success SetEnrollPhotoCS");
+
+                this.button_pass.Enabled = true;
+                this.button_nopass.Enabled = true;
+            }
+            else
+            {
+                setLabelAlarm("Picture does not exist");
+            }
+            this.axFP_CLOCK.EnableDevice(obj.vnDeviceID, 1);
+        }
+
+
+        private void button_getEnroll_Click(object sender, EventArgs e)
+        {
+            for(int ii = 0; ii < this.devices.Count; ii++)
+            {
+                JObject oldObj = (JObject)this.devices[ii];
+                AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent oldEvent = oldObj.ToObject<AxFPCLOCK_SVRLib._DFPCLOCK_SvrEvents_OnReceiveGLogDataEvent>();
+
+                
+                setLabelAlarm("Getting data from devices.");
+
+                bool bRet;
+
+                /////////////// Open ax_FPClock //////////////////
+                this.axFP_CLOCK.CloseCommPort();
+                int nDevicePort = Convert.ToInt32(this.textBox_port.Text.ToString());
+                int nPassword = Convert.ToInt32(this.textPassword.Text);
+
+                this.ipAddressControl1.Text = oldEvent.astrDeviceIP;
+                string strIP = this.ipAddressControl1.IPAddress.ToString();
+                int nDeviceID = oldEvent.vnDeviceID;
+                this.axFP_CLOCK.OpenCommPort(nDeviceID);
+                bRet = this.axFP_CLOCK.SetIPAddress(ref strIP, nDevicePort, nPassword);
+                if (!bRet)
+                {
+                    setLabelAlarm("Fail in Setting IP when getting log data from the device: " + nDeviceID);
+                    return;
+                }
+                this.axFP_CLOCK.OpenCommPort(nDeviceID);
+                //////////////////////////////////////////////////////
+
+
+                // Disable device
+                this.axFP_CLOCK.EnableDevice(nDeviceID, 0);
+
+                int dwBackupNum = 50;
+                int dwEnMachineID = nDeviceID;
+                //int dwPrivilegeNum = cmbPrivilege.SelectedIndex;
+                int dwPrivilegeNum = 0;
+                //need check
+                int dwEnrollNumber = oldEvent.anSEnrollNumber;
+
+                //int[] dwData = new int[1420 / 4];
+                //object obj = new System.Runtime.InteropServices.VariantWrapper(dwData);
+
+                int[] dwData = new int[1420 / 4];
+                //object obj = new System.Runtime.InteropServices.VariantWrapper(dwData);
+                int[] FacedwData = new int[1888 / 4];
+                object obj = new System.Runtime.InteropServices.VariantWrapper(FacedwData);
+                int dwPassword = 0;
+                int vPhotoSize = 0;
+                int[] indexDataFacePhoto = new int[400800];
+                int dwCardNum = 0;
+                long dwCardNum1 = 0;
+
+
+                if (dwBackupNum == 50)
+                {
+                    setLabelAlarm("Saving a log image.");
+                    IntPtr ptrIndexFacePhoto = Marshal.AllocHGlobal(indexDataFacePhoto.Length);
+                    bRet = this.axFP_CLOCK.GetEnrollPhotoCS(nDeviceID, dwEnrollNumber, ref vPhotoSize, ptrIndexFacePhoto);
+                    if (bRet)
+                    {
+                        byte[] mbytCurEnrollData = new byte[vPhotoSize];
+                        Marshal.Copy(ptrIndexFacePhoto, mbytCurEnrollData, 0, vPhotoSize);
+
+                        //DeleteFile(getPhotoFileName(dwEnrollNumber));
+                        //if (vPhotoSize > 0) writeFile(getPhotoFileName(dwEnrollNumber), mbytCurEnrollData, vPhotoSize);             
+                        System.IO.File.WriteAllBytes(@"C:\\PHOTO\" + dwEnrollNumber.ToString() + ".jpg", mbytCurEnrollData);
+                        setLabelAlarm("The Photo File is " + @"C:\PHOTO\" + dwEnrollNumber.ToString() + ".jpg");
+                    }
+                }
+
+                else
+                {
+                    bRet = this.axFP_CLOCK.GetEnrollData(
+                        oldEvent.vnDeviceID,
+                        dwEnrollNumber,
+                        dwEnMachineID,
+                        dwBackupNum,
+                        ref dwPrivilegeNum,
+                        ref obj,
+                        ref dwPassword
+                        );
+
+                    if (bRet)
+                    {
+                        if (dwBackupNum == 10)
+                        {
+                            setLabelAlarm("Password is " + dwPassword.ToString());
+                        }
+                        else if (dwBackupNum == 11)
+                        {
+
+                            dwCardNum = dwPassword;
+                            setLabelAlarm("Card number is " + dwCardNum.ToString());
+                            if (dwCardNum < 0)
+                            {
+                                dwCardNum1 = dwCardNum + 4294967296;
+                                setLabelAlarm("Card number is " + dwCardNum1.ToString());
+                            }
+
+                        }
+                        else if (dwBackupNum >= 20)
+                        {
+                            int[] intArrar = (int[])obj;
+
+                            int arrayLength = 1888 / 4;
+                            if (arrayLength > intArrar.Length)
+                            {
+                                arrayLength = intArrar.Length;
+                            }
+
+                            //for (int i = 0; i < intArrar.Length; i++ )
+                            for (int i = 0; i < arrayLength; i++)
+                            {
+                                // listBox1.Items.Add(intArrar[i].ToString("X8"));
+                            }
+
+                            FacedwData = (int[])obj;
+                            byte[] _indexDataFace = new byte[1888];
+                            //分配内存
+                            IntPtr _ptrIndexFace = Marshal.AllocHGlobal(_indexDataFace.Length);
+                            //int[]  转成 byte[]
+                            Marshal.Copy(FacedwData, 0, _ptrIndexFace, 1888 / 4);  //be careful
+                            Marshal.Copy(_ptrIndexFace, _indexDataFace, 0, 1888);
+                            Marshal.FreeHGlobal(_ptrIndexFace);
+                            gbytEnrollDataFace = _indexDataFace;   //accept byte[]
+                        }
+                        else
+                        {
+                            int[] intArrar = (int[])obj;
+
+                            int arrayLength = 1420 / 4;
+                            if (arrayLength > intArrar.Length)
+                            {
+                                arrayLength = intArrar.Length;
+                            }
+
+                            //for (int i = 0; i < intArrar.Length; i++ )
+                            for (int i = 0; i < arrayLength; i++)
+                            {
+                              //  listBox1.Items.Add(intArrar[i].ToString("X8"));
+                            }
+
+                            dwData = (int[])obj;
+                            byte[] _indexData = new byte[1420];
+                            //分配内存
+                            IntPtr _ptrIndex = Marshal.AllocHGlobal(_indexData.Length);
+                            //int[]  转成 byte[]
+                            Marshal.Copy(dwData, 0, _ptrIndex, 1420 / 4);  //be careful
+                            Marshal.Copy(_ptrIndex, _indexData, 0, 1420);
+                            Marshal.FreeHGlobal(_ptrIndex);
+                          //  gbytEnrollData = _indexData;   //accept byte[]                  
+
+                        }
+
+                    }
+                    else
+                    {
+                        setLabelAlarm("Error");
+                    }
+                }
+                // Enable device
+                this.axFP_CLOCK.EnableDevice(oldEvent.vnDeviceID, 1);
+            }
+        }
+
+        private void setLabelAlarm(string message)
+        {
+            this.label_alarm.Text = message;
+        }
+
+        private void SetPhotoDir()
+        {
+
+            if (false == System.IO.Directory.Exists(mstrPhotoDir))
+            {
+                System.IO.Directory.CreateDirectory(mstrPhotoDir);
+            }
+            else
+            {
+                mstrPhotoDir = "C:\\";
             }
         }
     }
